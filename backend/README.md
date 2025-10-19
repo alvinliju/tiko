@@ -32,6 +32,12 @@ Get your Twilio credentials:
 - Get WhatsApp sandbox number
 - Copy Account SID and Auth Token
 
+Get your Gemini API key:
+- Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+- Click "Get API Key"
+- Create a new API key
+- Copy it!
+
 ### 3. Run the Server
 
 **Development mode:**
@@ -120,6 +126,7 @@ backend/
 - **Runtime:** Node.js + TypeScript
 - **Framework:** Express
 - **Messaging:** Twilio WhatsApp API
+- **AI:** Google Gemini API (for dynamic responses)
 - **Scheduling:** node-cron
 - **Storage:** JSON file (simple!)
 
