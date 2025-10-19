@@ -4,6 +4,7 @@ import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +41,12 @@ const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+// Initialize Gemini AI (ADD THIS)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const geminiModel = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+
 
 // Helper: Load users from JSON file
 function loadUsers(): Users {
@@ -86,6 +93,58 @@ async function sendWhatsApp(phone: string, message: string): Promise<void> {
     console.log(`Message sent to ${phone}`);
   } catch (error) {
     console.error(`Error sending message to ${phone}:`, error);
+  }
+}
+
+// Helper: Generate AI response using Gemini
+async function generateAIResponse(
+  context: string,
+  userMessage: string,
+  streak?: number,
+  goal?: string
+): Promise<string> {
+  try {
+    const prompt = `You are a supportive, energetic accountability coach for a WhatsApp bot.
+
+Context: ${context}
+User's goal: ${goal || 'Not set yet'}
+Current streak: ${streak !== undefined ? `${streak} days` : 'N/A'}
+User message: ${userMessage}
+
+Rules:
+- Keep responses SHORT (1-2 sentences max, under 160 characters if possible)
+- Be ENERGETIC and supportive with emojis (🔥💪✨🚀💙)
+- NEVER use negative words: failed, lazy, behind, weak, disappointed
+- If user completed task: celebrate enthusiastically
+- If user missed: be understanding and encouraging about fresh starts
+- Always include the streak count when relevant
+- Match the tone: excited for wins, gentle for misses
+
+Generate a response:`;
+
+    const result = await geminiModel.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text().trim();
+    
+    // Ensure we include streak if provided
+    if (streak !== undefined && context.includes('completed')) {
+      if (!text.includes('Streak') && !text.includes('streak')) {
+        text += ` 🔥 Streak: ${streak} ${streak === 1 ? 'day' : 'days'}!`;
+      }
+    }
+    
+    return text;
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    // Fallback to static responses if API fails
+    if (context.includes('completed')) {
+      return `YES! 🔥 Streak: ${streak} ${streak === 1 ? 'day' : 'days'}! 💪`;
+    } else if (context.includes('missed')) {
+      return "No worries! Tomorrow's a fresh start. You got this! 💙";
+    } else if (context.includes('goal')) {
+      return "🎯 Locked in! I'll remind you daily. Let's go! 💪";
+    }
+    return "Got it! Keep going! 💪";
   }
 }
 
@@ -139,7 +198,15 @@ app.post('/webhook', async (req: Request, res: Response) => {
       lastCompleted: null,
       history: []
     };
-    response = `🎯 Locked in! I'll remind you daily. Let's go! 💪`;
+    
+    // Use Gemini to generate personalized response
+    response = await generateAIResponse(
+      'User just set a new goal',
+      goalText,
+      0,
+      goalText
+    );
+    
     saveUsers(users);
     await sendWhatsApp(phone, response);
   }
@@ -168,7 +235,14 @@ app.post('/webhook', async (req: Request, res: Response) => {
         users[phone].lastCompleted = today;
         users[phone].history.push({ date: today, completed: true });
         
-        response = getDoneResponse(users[phone].streak);
+        // Use Gemini for personalized celebration
+        response = await generateAIResponse(
+          'User completed their goal today',
+          'done',
+          users[phone].streak,
+          users[phone].goal
+        );
+        
         saveUsers(users);
       }
     }
@@ -184,7 +258,14 @@ app.post('/webhook', async (req: Request, res: Response) => {
       users[phone].streak = 0;
       users[phone].history.push({ date: today, completed: false });
       
-      response = getNopeResponse();
+      // Use Gemini for supportive response
+      response = await generateAIResponse(
+        'User missed their goal today',
+        'nope',
+        0,
+        users[phone].goal
+      );
+      
       saveUsers(users);
     }
     await sendWhatsApp(phone, response);
@@ -208,7 +289,14 @@ app.post('/webhook', async (req: Request, res: Response) => {
       users[phone].lastCompleted = today;
       users[phone].history.push({ date: today, completed: true });
       
-      response = getPartialResponse(text) + ` 🔥 Streak: ${users[phone].streak} ${users[phone].streak === 1 ? 'day' : 'days'}!`;
+      // Use Gemini for encouraging partial completion response
+      response = await generateAIResponse(
+        'User partially completed their goal',
+        text,
+        users[phone].streak,
+        users[phone].goal
+      );
+      
       saveUsers(users);
     }
     await sendWhatsApp(phone, response);
